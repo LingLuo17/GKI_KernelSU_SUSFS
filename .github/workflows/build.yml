@@ -714,26 +714,59 @@ jobs:
           fi
 
           if [ "${{ inputs.ksu_variant }}" == "Official" ] || [ "${{ inputs.ksu_variant }}" == "Next" ] || [ "${{ inputs.ksu_variant }}" == "SukiSU" ] || [ "${{ inputs.ksu_variant }}" == "SukiSU(40726)" ] || [ "${{ inputs.ksu_variant }}" == "SukiSU(40548)" ] || [ "${{ inputs.ksu_variant }}" == "ReSukiSU" ]; then
-            # Android 12 - 5.10 修复
-            if [[ "${{ inputs.android_version }}" == "android12" && "${{ inputs.kernel_version }}" == "5.10" ]]; then
-              # 修复 2024-11 分支: mmap.c 调用了 vm_flags_clear()，但同分支 mm.h 未提供 helper
+            fix_namespace_susfs_mount_decls() {
+              local label="$1"
+              local marker_pattern="$2"
+
+              if ! grep -q "$marker_pattern" ./fs/namespace.c; then
+                return
+              fi
+
+              if ! grep -qF '#include <linux/susfs_def.h>' ./fs/namespace.c; then
+                echo "检测到 ${label} namespace.c 缺少 susfs_def.h，注入声明..."
+                if grep -qF '#include <linux/mnt_idmapping.h>' ./fs/namespace.c; then
+                  sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif' ./fs/namespace.c
+                elif grep -qF '#include <linux/shmem_fs.h>' ./fs/namespace.c; then
+                  sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif' ./fs/namespace.c
+                else
+                  sed -i '0,/^#include /s//#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif\n&/' ./fs/namespace.c
+                fi
+              fi
+
+              if ! grep -q 'extern bool susfs_is_current_ksu_domain' ./fs/namespace.c; then
+                echo "检测到 ${label} namespace.c 缺少 SUSFS mount extern，注入声明..."
+                sed -i '/#include "internal.h"/a \\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n\n#define CL_COPY_MNT_NS BIT(25)\n\n#endif' ./fs/namespace.c
+              fi
+            }
+
+            fix_missing_vm_flags_clear() {
               if [[ "${{ inputs.os_patch_level }}" == "2024-11" ]] && grep -qF 'vm_flags_clear(new_vma, VM_PAD_MASK);' ./mm/mmap.c; then
                 sed -i 's/vm_flags_clear(new_vma, VM_PAD_MASK);/new_vma->vm_flags \&= ~VM_PAD_MASK;/' ./mm/mmap.c
               fi
-              if [[ "$CURRENT_SUB" -le 209 ]]; then
+            }
+
+            fix_task_mmu_show_pad() {
+              local max_sub="$1"
+              local excluded_patch_level="${2:-}"
+
+              if [[ "$CURRENT_SUB" -le "$max_sub" ]] \
+                && { [[ -z "$excluded_patch_level" ]] || [[ "${{ inputs.os_patch_level }}" != "$excluded_patch_level" ]]; }; then
                 sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
               fi
+            }
+
+            # Android 12 - 5.10 修复
+            if [[ "${{ inputs.android_version }}" == "android12" && "${{ inputs.kernel_version }}" == "5.10" ]]; then
+              # 修复 2024-11 分支: mmap.c 调用了 vm_flags_clear()，但同分支 mm.h 未提供 helper
+              fix_missing_vm_flags_clear
+              fix_task_mmu_show_pad 209
             fi
 
             # Android 13 - 5.15 修复
             if [[ "${{ inputs.android_version }}" == "android13" && "${{ inputs.kernel_version }}" == "5.15" ]]; then
               # 修复 2024-11 分支: mmap.c 调用了 vm_flags_clear()，但同分支 mm.h 未提供 helper
-              if [[ "${{ inputs.os_patch_level }}" == "2024-11" ]] && grep -qF 'vm_flags_clear(new_vma, VM_PAD_MASK);' ./mm/mmap.c; then
-                sed -i 's/vm_flags_clear(new_vma, VM_PAD_MASK);/new_vma->vm_flags \&= ~VM_PAD_MASK;/' ./mm/mmap.c
-              fi
-              if [[ "$CURRENT_SUB" -le 148 && "${{ inputs.os_patch_level }}" != "2024-05" ]]; then
-                sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-              fi
+              fix_missing_vm_flags_clear
+              fix_task_mmu_show_pad 148 "2024-05"
               # 修复 5.15 LTS: task_mmu.c 头部 hunk 失配，导致 SUSFS 宏缺少声明
               if grep -q 'SUSFS_IS_INODE_SUS_MAP\|SUSFS_IS_INODE_OPEN_REDIRECT' ./fs/proc/task_mmu.c && ! grep -qF '#include <linux/susfs_def.h>' ./fs/proc/task_mmu.c; then
                 if grep -qF '#include <linux/pkeys.h>' ./fs/proc/task_mmu.c; then
@@ -745,6 +778,8 @@ jobs:
                 fi
                 echo "已修复 Android 13 5.15 task_mmu.c 缺少 susfs_def.h 问题"
               fi
+              # 修复 5.15 LTS: namespace.c 头部 hunk 失配，导致 SUSFS mount 符号缺少声明
+              fix_namespace_susfs_mount_decls "Android 13 5.15" 'DEFAULT_KSU_MNT_ID\|VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT\|CL_COPY_MNT_NS'
             fi
 
             # Android 14 - 6.1 修复
@@ -756,18 +791,9 @@ jobs:
                   sed -i '/#include <linux\/cpufreq_times.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif' ./fs/proc/base.c
                 fi
               fi
-              if [[ "$CURRENT_SUB" -le 75 && "${{ inputs.os_patch_level }}" != "2024-05" ]]; then
-                sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-              fi
-              # 修复 6.1 LTS: SUSFS 补丁在 namespace.c 头部 hunk 因上下文不匹配而失败，
-              # 导致函数体中的 SUSFS 符号（DEFAULT_KSU_MNT_ID 等）未声明
-              if grep -q 'DEFAULT_KSU_MNT_ID\|susfs_mnt_id_ida' ./fs/namespace.c && ! grep -qF '#include <linux/susfs_def.h>' ./fs/namespace.c; then
-                echo "检测到 namespace.c 缺少 susfs_def.h，注入声明..."
-                sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif' ./fs/namespace.c
-                if ! grep -q 'extern bool susfs_is_current_ksu_domain' ./fs/namespace.c; then
-                  sed -i '/#include "internal.h"/a \\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n\n#define CL_COPY_MNT_NS BIT(25)\n\n#endif' ./fs/namespace.c
-                fi
-              fi
+              fix_task_mmu_show_pad 75 "2024-05"
+              # 修复 6.1 LTS: namespace.c 头部 hunk 失配，导致 SUSFS mount 符号缺少声明
+              fix_namespace_susfs_mount_decls "Android 14 6.1" 'DEFAULT_KSU_MNT_ID\|susfs_mnt_id_ida'
             fi
 
             # Android 15 - 6.6 修复
