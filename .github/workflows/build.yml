@@ -474,6 +474,7 @@ jobs:
             "SukiSU")
               echo "添加 ${{ inputs.ksu_variant }}..."
               curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash $BRANCH
+              sed -i '/^git_branch/s/= .*/= LingLuo/' KernelSU/kernel/Kbuild
               ;;
             "ReSukiSU")
               echo "添加 ReSukiSU..."
