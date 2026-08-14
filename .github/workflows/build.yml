@@ -549,7 +549,7 @@ jobs:
                 exit 1
               }
             }
-          ' "$KBUILD_FILE" > "${KBUILD_FILE}.tmp" && mv "${KBUILD_FILE}.tmp" "$KBUILD_FILE"
+          ' "$KBUILD_FILE" > "${KBUILD_FILE}.tmp" && mv "${KBUILD_FILE}.tmp" "$KBUILD_FILE" || { rm -f "${KBUILD_FILE}.tmp"; true; }
 
           echo "已更新 get_ksu_version_full 模板: $VERSION_TEMPLATE"
 
