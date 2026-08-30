@@ -1004,7 +1004,8 @@ jobs:
           enable_config CONFIG_IPC_NS
           enable_config CONFIG_PID_NS
           enable_config CONFIG_DEVTMPFS
-
+          enable_config CONFIG_USER_NS
+          
           # 可选: 网络相关配置 (Docker/NAT 模式)
           enable_config_if_defined CONFIG_NETFILTER_XT_MATCH_ADDRTYPE
           enable_config_if_defined CONFIG_NETFILTER_XT_TARGET_LOG
