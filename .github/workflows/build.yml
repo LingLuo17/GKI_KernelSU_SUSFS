@@ -903,13 +903,10 @@ jobs:
           fi
 
           # 修复 6.12 lsm_hook.c: security_add_hooks 参数类型变了
-          # 5.10~6.6 无 struct lsm_id，保持原始写法，不能替换
-          if [[ "$ANDROID_VERSION" == "android16" && "$KERNEL_VERSION" == "6.12" ]]; then
-            LSM_HOOK="$KERNEL_ROOT/common/drivers/kernelsu/hook/lsm_hook.c"
-            if [ -f "$LSM_HOOK" ] && grep -q 'security_add_hooks.*"ksu"' "$LSM_HOOK"; then
-              sed -i 's/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu")/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), \&(struct lsm_id){"ksu", 0})/' "$LSM_HOOK"
-              echo "已修复 lsm_hook.c security_add_hooks 6.12 兼容"
-            fi
+          LSM_HOOK="$KERNEL_ROOT/common/drivers/kernelsu/hook/lsm_hook.c"
+          if [ -f "$LSM_HOOK" ] && grep -q 'security_add_hooks.*"ksu"' "$LSM_HOOK"; then
+            sed -i 's/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu")/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), \&(struct lsm_id){"ksu", 0})/' "$LSM_HOOK"
+            echo "已修复 lsm_hook.c security_add_hooks 6.12 兼容"
           fi
 
           
