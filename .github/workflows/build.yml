@@ -903,12 +903,14 @@ jobs:
           fi
 
           # 修复 6.12 lsm_hook.c: security_add_hooks 参数类型变了
-          LSM_HOOK="$KERNEL_ROOT/common/drivers/kernelsu/hook/lsm_hook.c"
-          if [ -f "$LSM_HOOK" ] && grep -q 'security_add_hooks.*"ksu"' "$LSM_HOOK"; then
-            sed -i 's/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu")/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), \&(struct lsm_id){"ksu", 0})/' "$LSM_HOOK"
-            echo "已修复 lsm_hook.c security_add_hooks 6.12 兼容"
+          # struct lsm_id 内核 6.8 才引入，其余版本必须保持原始 "ksu" 写法
+          if [[ "${{ inputs.android_version }}" == "android16" && "${{ inputs.kernel_version }}" == "6.12" ]]; then
+            LSM_HOOK="$KERNEL_ROOT/common/drivers/kernelsu/hook/lsm_hook.c"
+            if [ -f "$LSM_HOOK" ] && grep -q 'security_add_hooks.*"ksu"' "$LSM_HOOK"; then
+              sed -i 's/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu")/security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), \&(struct lsm_id){"ksu", 0})/' "$LSM_HOOK"
+              echo "已修复 lsm_hook.c security_add_hooks 6.12 兼容"
+            fi
           fi
-
           
       - name: 克隆 Droidspaces 补丁仓库
         if: inputs.droidspaces != 'off'
