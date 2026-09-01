@@ -1,4 +1,4 @@
-name: 内核构建 - Android 12 (5.10)
+name: "内核构建 - Android 12 (5.10)"
 
 permissions:
   contents: write
